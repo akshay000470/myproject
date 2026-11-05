@@ -11,3 +11,4 @@ export const createClient = () => {
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-key";
   return createBrowserClient(url, anonKey);
 };
+

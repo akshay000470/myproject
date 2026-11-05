@@ -150,3 +150,4 @@ export function AddAccountModal({ isOpen, onClose }: AddAccountModalProps) {
     </Modal>
   );
 }
+

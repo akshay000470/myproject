@@ -41,3 +41,4 @@ export function formatDate(dateString?: string | null): string {
 export function formatPercentage(value: number): string {
   return `${Math.round(value)}%`;
 }
+
