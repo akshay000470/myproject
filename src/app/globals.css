@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+@theme {
+  --color-warm-ivory: #F8F7F2;
+  --color-forest-green: #174D3C;
+  --color-forest-green-dark: #0E362A;
+  --color-forest-green-light: #236B54;
+  --color-dark-charcoal: #171A18;
+  --color-soft-sage: #DCE8DE;
+  --color-muted-gold: #B69B62;
+  --color-subtle-border: #E7E6DF;
+  --color-secondary-text: #777B76;
+  --color-expense-red: #C65C54;
+  --color-income-green: #1E654C;
+}
+
+:root {
+  --background: #F8F7F2;
+  --foreground: #171A18;
+  --primary: #174D3C;
+  --border: #E7E6DF;
+  --muted: #777B76;
+}
+
+body {
+  background-color: #F8F7F2;
+  color: #171A18;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar for fintech elegance */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F8F7F2;
+}
+::-webkit-scrollbar-thumb {
+  background: #DCE8DE;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #B69B62;
+}
+
+/* Tabular numbers for financial precision */
+.num-tabular {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
