@@ -9,15 +9,13 @@ import {
   RecurringTransaction,
   SavingsGoal,
   GoalStatus,
-  GoalContribution,
   Loan,
   LoanStatus,
-  LoanRepayment,
   Profile,
   Notification,
   UserPreferences,
 } from "@/types/database";
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { apiCall } from "@/lib/api-client";
 
 interface DateRangeOption {
   label: string;
@@ -95,29 +93,7 @@ interface FinanceContextType {
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
-const DEFAULT_CATEGORIES: Omit<Category, "id" | "user_id" | "created_at">[] = [
-  { name: "Food & Dining", type: "expense", icon: "utensils", color: "#174D3C", is_default: true },
-  { name: "Transportation", type: "expense", icon: "car", color: "#2D5A47", is_default: true },
-  { name: "Shopping", type: "expense", icon: "shopping-bag", color: "#B69B62", is_default: true },
-  { name: "Entertainment", type: "expense", icon: "film", color: "#5A6B5C", is_default: true },
-  { name: "Education", type: "expense", icon: "book-open", color: "#3A6351", is_default: true },
-  { name: "Healthcare", type: "expense", icon: "heart-pulse", color: "#C65C54", is_default: true },
-  { name: "Housing & Rent", type: "expense", icon: "home", color: "#174D3C", is_default: true },
-  { name: "Utilities & Bills", type: "expense", icon: "zap", color: "#8C7A4E", is_default: true },
-  { name: "Subscriptions", type: "expense", icon: "repeat", color: "#657766", is_default: true },
-  { name: "Travel", type: "expense", icon: "plane", color: "#2B4A3E", is_default: true },
-  { name: "Other Expense", type: "expense", icon: "tag", color: "#777B76", is_default: true },
-  { name: "Salary", type: "income", icon: "briefcase", color: "#174D3C", is_default: true },
-  { name: "Freelance", type: "income", icon: "laptop", color: "#2D5A47", is_default: true },
-  { name: "Investments", type: "income", icon: "trending-up", color: "#B69B62", is_default: true },
-  { name: "Dividends", type: "income", icon: "pie-chart", color: "#3A6351", is_default: true },
-  { name: "Other Income", type: "income", icon: "plus-circle", color: "#777B76", is_default: true },
-];
-
 export function FinanceProvider({ children }: { children: React.ReactNode }) {
-  const [isConfigured] = useState(isSupabaseConfigured());
-  const [supabase] = useState(() => (isSupabaseConfigured() ? createClient() : null));
-
   const [user, setUser] = useState<{ id: string; email: string; full_name?: string } | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -127,198 +103,138 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [recurring, setRecurring] = useState<RecurringTransaction[]>([]);
   const [goals, setGoals] = useState<SavingsGoal[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [preferences, setPreferences] = useState<UserPreferences | null>(null);
+  const [notifications] = useState<Notification[]>([]);
+  const [preferences] = useState<UserPreferences | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isMounted, setIsMounted] = useState(false);
   const [selectedRange, setSelectedRange] = useState<DateRangeOption["value"]>("this_month");
 
-  const loadLocalStorageData = React.useCallback((userId: string) => {
-    const dataKey = `antigravity_data_${userId}`;
-    const raw = localStorage.getItem(dataKey);
-    if (raw) {
-      try {
-        const data = JSON.parse(raw);
-        setAccounts(data.accounts || []);
-        setCategories(data.categories || []);
-        setTransactions(data.transactions || []);
-        setBudgets(data.budgets || []);
-        setRecurring(data.recurring || []);
-        setGoals(data.goals || []);
-        setLoans(data.loans || []);
-        setProfile(data.profile || null);
-        setPreferences(data.preferences || null);
-      } catch {
-        // Ignore JSON parse errors
-      }
-    }
-  }, []);
-
-  const saveLocalStorageData = React.useCallback((userId: string, partial: Record<string, unknown>) => {
-    const dataKey = `antigravity_data_${userId}`;
-    const current = JSON.parse(localStorage.getItem(dataKey) || "{}");
-    const updated = { ...current, ...partial };
-    localStorage.setItem(dataKey, JSON.stringify(updated));
-  }, []);
-
-  const loadSupabaseData = React.useCallback(async (userId: string) => {
-    if (!supabase) return;
-    try {
-      const [
-        { data: prof },
-        { data: accs },
-        { data: cats },
-        { data: txs },
-        { data: bdgs },
-        { data: recs },
-        { data: gls },
-        { data: lns },
-      ] = await Promise.all([
-        supabase.from("profiles").select("*").eq("id", userId).single(),
-        supabase.from("accounts").select("*").eq("user_id", userId).order("name"),
-        supabase.from("categories").select("*").eq("user_id", userId).order("name"),
-        supabase.from("transactions").select("*").eq("user_id", userId).order("date", { ascending: false }),
-        supabase.from("budgets").select("*").eq("user_id", userId),
-        supabase.from("recurring_transactions").select("*").eq("user_id", userId),
-        supabase.from("savings_goals").select("*").eq("user_id", userId),
-        supabase.from("loans").select("*").eq("user_id", userId),
-      ]);
-
-      if (prof) setProfile(prof as Profile);
-      if (accs) setAccounts(accs as Account[]);
-      if (cats) setCategories(cats as Category[]);
-      if (txs) setTransactions(txs as Transaction[]);
-      if (bdgs) setBudgets(bdgs as Budget[]);
-      if (recs) setRecurring(recs as RecurringTransaction[]);
-      if (gls) setGoals(gls as SavingsGoal[]);
-      if (lns) setLoans(lns as Loan[]);
-    } catch (err) {
-      console.error("Error fetching Supabase data:", err);
-    }
-  }, [supabase]);
+  const loadUserData = (data: {
+    accounts?: Account[];
+    categories?: Category[];
+    transactions?: Transaction[];
+    budgets?: Budget[];
+    recurring?: RecurringTransaction[];
+    goals?: SavingsGoal[];
+    loans?: Loan[];
+  }) => {
+    if (data.accounts) setAccounts(data.accounts);
+    if (data.categories) setCategories(data.categories);
+    if (data.transactions) setTransactions(data.transactions);
+    if (data.budgets) setBudgets(data.budgets);
+    if (data.recurring) setRecurring(data.recurring);
+    if (data.goals) setGoals(data.goals);
+    if (data.loans) setLoans(data.loans);
+  };
 
   // Load Initial Session & Data
   useEffect(() => {
     setIsMounted(true);
     async function init() {
       setIsLoading(true);
-      if (isConfigured && supabase) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          setUser({
-            id: session.user.id,
-            email: session.user.email || "",
-            full_name: session.user.user_metadata?.full_name,
+      const token = localStorage.getItem("auth_token");
+      const storedUser = localStorage.getItem("auth_user");
+      if (token && storedUser) {
+        try {
+          const parsed = JSON.parse(storedUser);
+          setUser(parsed);
+          setProfile({
+            id: parsed.id,
+            email: parsed.email,
+            full_name: parsed.full_name || null,
+            avatar_url: parsed.avatar_url || null,
+            preferred_currency: parsed.preferred_currency || "INR",
+            date_format: parsed.date_format || "DD/MM/YYYY",
+            created_at: parsed.created_at || new Date().toISOString(),
+            updated_at: parsed.updated_at || new Date().toISOString(),
           });
-          await loadSupabaseData(session.user.id);
-        } else {
+          // Fetch fresh data from API
+          const [accs, cats, txs, bdgs, recs, gls, lns] = await Promise.all([
+            apiCall("/accounts"),
+            apiCall("/categories"),
+            apiCall("/transactions"),
+            apiCall("/budgets"),
+            apiCall("/recurring"),
+            apiCall("/goals"),
+            apiCall("/loans"),
+          ]);
+          loadUserData({ accounts: accs, categories: cats, transactions: txs, budgets: bdgs, recurring: recs, goals: gls, loans: lns });
+        } catch {
+          localStorage.removeItem("auth_token");
+          localStorage.removeItem("auth_user");
           setUser(null);
-        }
-      } else {
-        // Fallback / Sandbox storage when user has not yet configured Supabase keys
-        const localUser = localStorage.getItem("antigravity_user");
-        if (localUser) {
-          try {
-            const parsed = JSON.parse(localUser);
-            setUser(parsed);
-            loadLocalStorageData(parsed.id);
-          } catch {
-            setUser(null);
-          }
         }
       }
       setIsLoading(false);
     }
     init();
-  }, [isConfigured, supabase, loadLocalStorageData, loadSupabaseData]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auth Functions
   const signIn = async (email: string, password: string) => {
-    if (isConfigured && supabase) {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) return { error: error.message };
-      if (data.user) {
-        setUser({ id: data.user.id, email: data.user.email || "", full_name: data.user.user_metadata?.full_name });
-        await loadSupabaseData(data.user.id);
-      }
+    try {
+      const res = await apiCall("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+      });
+      localStorage.setItem("auth_token", res.token);
+      localStorage.setItem("auth_user", JSON.stringify(res.user));
+      setUser({ id: res.user.id, email: res.user.email, full_name: res.user.full_name });
+      setProfile({
+        id: res.user.id,
+        email: res.user.email,
+        full_name: res.user.full_name,
+        avatar_url: res.user.avatar_url || null,
+        preferred_currency: res.user.preferred_currency || "INR",
+        date_format: res.user.date_format || "DD/MM/YYYY",
+        created_at: res.user.created_at || new Date().toISOString(),
+        updated_at: res.user.updated_at || new Date().toISOString(),
+      });
+      if (res.data) loadUserData(res.data);
       return {};
-    } else {
-      // Local Auth Engine
-      const mockId = "usr_" + btoa(email).slice(0, 8);
-      const userObj = { id: mockId, email, full_name: email.split("@")[0] };
-      setUser(userObj);
-      localStorage.setItem("antigravity_user", JSON.stringify(userObj));
-      loadLocalStorageData(mockId);
-      return {};
+    } catch (err: unknown) {
+      return { error: err instanceof Error ? err.message : "Login failed" };
     }
   };
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    if (isConfigured && supabase) {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { full_name: fullName } },
+    try {
+      const res = await apiCall("/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ email, password, full_name: fullName }),
       });
-      if (error) return { error: error.message };
-      if (data.user) {
-        setUser({ id: data.user.id, email: data.user.email || "", full_name: fullName });
-        await loadSupabaseData(data.user.id);
-      }
-      return {};
-    } else {
-      // Local Auth Engine
-      const mockId = "usr_" + btoa(email).slice(0, 8);
-      const userObj = { id: mockId, email, full_name: fullName };
-      setUser(userObj);
-      localStorage.setItem("antigravity_user", JSON.stringify(userObj));
-
-      // Seed Default Categories for new user
-      const initialCats: Category[] = DEFAULT_CATEGORIES.map((c, i) => ({
-        ...c,
-        id: `cat_${Date.now()}_${i}`,
-        user_id: mockId,
-        created_at: new Date().toISOString(),
-      }));
-
-      const initialProfile: Profile = {
-        id: mockId,
-        email,
-        full_name: fullName,
+      localStorage.setItem("auth_token", res.token);
+      localStorage.setItem("auth_user", JSON.stringify(res.user));
+      setUser({ id: res.user.id, email: res.user.email, full_name: res.user.full_name });
+      setProfile({
+        id: res.user.id,
+        email: res.user.email,
+        full_name: res.user.full_name,
         avatar_url: null,
         preferred_currency: "INR",
         date_format: "DD/MM/YYYY",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-      };
-
-      setCategories(initialCats);
-      setProfile(initialProfile);
+      });
       setAccounts([]);
       setTransactions([]);
       setBudgets([]);
       setRecurring([]);
       setGoals([]);
       setLoans([]);
-
-      saveLocalStorageData(mockId, {
-        profile: initialProfile,
-        categories: initialCats,
-        accounts: [],
-        transactions: [],
-        budgets: [],
-        recurring: [],
-        goals: [],
-        loans: [],
-      });
+      // Fetch seeded categories
+      const cats = await apiCall("/categories");
+      setCategories(cats);
       return {};
+    } catch (err: unknown) {
+      return { error: err instanceof Error ? err.message : "Registration failed" };
     }
   };
 
   const signOut = async () => {
-    if (isConfigured && supabase) {
-      await supabase.auth.signOut();
-    }
+    localStorage.removeItem("auth_token");
+    localStorage.removeItem("auth_user");
     setUser(null);
     setProfile(null);
     setAccounts([]);
@@ -328,119 +244,59 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setRecurring([]);
     setGoals([]);
     setLoans([]);
-    localStorage.removeItem("antigravity_user");
   };
 
   const updateProfile = async (fullName: string, preferredCurrency: string) => {
     if (!user) return;
-    const updated: Profile = {
-      ...(profile || {
-        id: user.id,
-        email: user.email,
-        avatar_url: null,
-        date_format: "DD/MM/YYYY",
-        created_at: new Date().toISOString(),
-      }),
-      full_name: fullName,
-      preferred_currency: preferredCurrency,
-      updated_at: new Date().toISOString(),
-    };
+    const updated = await apiCall("/profile", {
+      method: "PUT",
+      body: JSON.stringify({ full_name: fullName, preferred_currency: preferredCurrency }),
+    });
     setProfile(updated);
-
-    if (isConfigured && supabase) {
-      await supabase.from("profiles").upsert(updated);
-    } else {
-      saveLocalStorageData(user.id, { profile: updated });
+    // Also update auth_user in localStorage
+    const storedUser = localStorage.getItem("auth_user");
+    if (storedUser) {
+      try {
+        const parsed = JSON.parse(storedUser);
+        localStorage.setItem("auth_user", JSON.stringify({ ...parsed, full_name: fullName, preferred_currency: preferredCurrency }));
+      } catch { /* ignore */ }
     }
   };
 
   // ACCOUNTS CRUD
   const addAccount = async (accData: Omit<Account, "id" | "user_id" | "created_at" | "updated_at">) => {
     if (!user) return;
-    const newAccount: Account = {
-      ...accData,
-      id: "acc_" + Date.now(),
-      user_id: user.id,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    if (isConfigured && supabase) {
-      const { data, error } = await supabase.from("accounts").insert({
-        user_id: user.id,
-        name: accData.name,
-        type: accData.type,
-        balance: accData.balance,
-        currency: accData.currency || "INR",
-        color: accData.color || "#174D3C",
-        is_archived: false,
-      }).select().single();
-      if (!error && data) {
-        setAccounts((prev) => [...prev, data as Account]);
-      }
-    } else {
-      const updated = [...accounts, newAccount];
-      setAccounts(updated);
-      saveLocalStorageData(user.id, { accounts: updated });
-    }
+    const account = await apiCall("/accounts", {
+      method: "POST",
+      body: JSON.stringify(accData),
+    });
+    setAccounts((prev) => [...prev, account]);
   };
 
   const updateAccount = async (id: string, updates: Partial<Account>) => {
     if (!user) return;
-    const updated = accounts.map((a) => (a.id === id ? { ...a, ...updates, updated_at: new Date().toISOString() } : a));
-    setAccounts(updated);
-
-    if (isConfigured && supabase) {
-      await supabase.from("accounts").update(updates).eq("id", id).eq("user_id", user.id);
-    } else {
-      saveLocalStorageData(user.id, { accounts: updated });
-    }
+    const account = await apiCall(`/accounts/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(updates),
+    });
+    setAccounts((prev) => prev.map((a) => (a.id === id ? account : a)));
   };
 
   const deleteAccount = async (id: string) => {
     if (!user) return;
-    const updated = accounts.filter((a) => a.id !== id);
-    setAccounts(updated);
-
-    if (isConfigured && supabase) {
-      await supabase.from("accounts").delete().eq("id", id).eq("user_id", user.id);
-    } else {
-      saveLocalStorageData(user.id, { accounts: updated });
-    }
+    await apiCall(`/accounts/${id}`, { method: "DELETE" });
+    setAccounts((prev) => prev.filter((a) => a.id !== id));
   };
 
   const transferFunds = async (fromAccountId: string, toAccountId: string, amount: number, notes?: string) => {
     if (!user || amount <= 0 || fromAccountId === toAccountId) return;
-    const fromAcc = accounts.find((a) => a.id === fromAccountId);
     const toAcc = accounts.find((a) => a.id === toAccountId);
-    if (!fromAcc || !toAcc) return;
+    if (!toAcc) return;
 
-    if (isConfigured && supabase) {
-      await supabase.rpc("perform_account_transfer", {
-        p_user_id: user.id,
-        p_from_account_id: fromAccountId,
-        p_to_account_id: toAccountId,
-        p_amount: amount,
-        p_title: `Transfer to ${toAcc.name}`,
-        p_date: new Date().toISOString().split("T")[0],
-        p_description: notes || "Internal account transfer",
-      });
-      await loadSupabaseData(user.id);
-    } else {
-      // Atomic local balance update
-      const updatedAccounts = accounts.map((acc) => {
-        if (acc.id === fromAccountId) {
-          return { ...acc, balance: acc.balance - amount, updated_at: new Date().toISOString() };
-        }
-        if (acc.id === toAccountId) {
-          return { ...acc, balance: acc.balance + amount, updated_at: new Date().toISOString() };
-        }
-        return acc;
-      });
-
-      const newTx: Transaction = {
-        id: "tx_" + Date.now(),
-        user_id: user.id,
+    // Create a transfer transaction (deducts from source)
+    await apiCall("/transactions", {
+      method: "POST",
+      body: JSON.stringify({
         account_id: fromAccountId,
         destination_account_id: toAccountId,
         title: `Transfer to ${toAcc.name}`,
@@ -449,283 +305,117 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         date: new Date().toISOString().split("T")[0],
         payment_method: "Transfer",
         description: notes || "Internal account transfer",
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
+        category_id: null,
+      }),
+    });
 
-      const updatedTxs = [newTx, ...transactions];
-      setAccounts(updatedAccounts);
-      setTransactions(updatedTxs);
-      saveLocalStorageData(user.id, { accounts: updatedAccounts, transactions: updatedTxs });
-    }
+    // Manually adjust destination account balance via update
+    await apiCall(`/accounts/${toAccountId}`, {
+      method: "PUT",
+      body: JSON.stringify({ balance: (toAcc.balance + amount) }),
+    });
+
+    // Refresh accounts and transactions from server
+    const [accs, txs] = await Promise.all([apiCall("/accounts"), apiCall("/transactions")]);
+    setAccounts(accs);
+    setTransactions(txs);
   };
 
   // TRANSACTIONS CRUD
   const addTransaction = async (txData: Omit<Transaction, "id" | "user_id" | "created_at" | "updated_at">) => {
     if (!user) return;
-    const newTx: Transaction = {
-      ...txData,
-      id: "tx_" + Date.now(),
-      user_id: user.id,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    // Update account balance
-    const updatedAccounts = accounts.map((acc) => {
-      if (acc.id === txData.account_id) {
-        const delta = txData.type === "income" ? txData.amount : -txData.amount;
-        return { ...acc, balance: acc.balance + delta, updated_at: new Date().toISOString() };
-      }
-      return acc;
+    const tx = await apiCall("/transactions", {
+      method: "POST",
+      body: JSON.stringify(txData),
     });
-
-    if (isConfigured && supabase) {
-      const { data, error } = await supabase.from("transactions").insert({
-        user_id: user.id,
-        account_id: txData.account_id,
-        category_id: txData.category_id,
-        title: txData.title,
-        amount: txData.amount,
-        type: txData.type,
-        date: txData.date,
-        payment_method: txData.payment_method,
-        description: txData.description,
-      }).select().single();
-
-      if (!error && data) {
-        setTransactions((prev) => [data as Transaction, ...prev]);
-        const targetAcc = updatedAccounts.find((a) => a.id === txData.account_id);
-        if (targetAcc) {
-          await supabase.from("accounts").update({ balance: targetAcc.balance }).eq("id", targetAcc.id);
-        }
-        setAccounts(updatedAccounts);
-      }
-    } else {
-      const updatedTxs = [newTx, ...transactions];
-      setTransactions(updatedTxs);
-      setAccounts(updatedAccounts);
-      saveLocalStorageData(user.id, { transactions: updatedTxs, accounts: updatedAccounts });
-    }
+    setTransactions((prev) => [tx, ...prev]);
+    // Refresh account balances
+    const accs = await apiCall("/accounts");
+    setAccounts(accs);
   };
 
   const updateTransaction = async (id: string, updates: Partial<Transaction>) => {
     if (!user) return;
-    const existing = transactions.find((t) => t.id === id);
-    if (!existing) return;
-
-    // Recalculate account balance differences if amount or type changed
-    let updatedAccounts = [...accounts];
-    if (updates.amount !== undefined || updates.type !== undefined) {
-      const targetAccId = updates.account_id || existing.account_id;
-      const oldDelta = existing.type === "income" ? existing.amount : -existing.amount;
-      const newType = updates.type || existing.type;
-      const newAmount = updates.amount !== undefined ? updates.amount : existing.amount;
-      const newDelta = newType === "income" ? newAmount : -newAmount;
-      const diff = newDelta - oldDelta;
-
-      updatedAccounts = updatedAccounts.map((a) =>
-        a.id === targetAccId ? { ...a, balance: a.balance + diff } : a
-      );
-    }
-
-    const updatedTxs = transactions.map((t) =>
-      t.id === id ? { ...t, ...updates, updated_at: new Date().toISOString() } : t
-    );
-
-    setTransactions(updatedTxs);
-    setAccounts(updatedAccounts);
-
-    if (isConfigured && supabase) {
-      await supabase.from("transactions").update(updates).eq("id", id).eq("user_id", user.id);
-      const targetAcc = updatedAccounts.find((a) => a.id === existing.account_id);
-      if (targetAcc) {
-        await supabase.from("accounts").update({ balance: targetAcc.balance }).eq("id", targetAcc.id);
-      }
-    } else {
-      saveLocalStorageData(user.id, { transactions: updatedTxs, accounts: updatedAccounts });
-    }
+    const tx = await apiCall(`/transactions/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(updates),
+    });
+    setTransactions((prev) => prev.map((t) => (t.id === id ? tx : t)));
+    // Refresh account balances
+    const accs = await apiCall("/accounts");
+    setAccounts(accs);
   };
 
   const deleteTransaction = async (id: string) => {
     if (!user) return;
-    const tx = transactions.find((t) => t.id === id);
-    if (!tx) return;
-
-    // Reverse balance change
-    const updatedAccounts = accounts.map((acc) => {
-      if (acc.id === tx.account_id) {
-        const revertDelta = tx.type === "income" ? -tx.amount : tx.amount;
-        return { ...acc, balance: acc.balance + revertDelta };
-      }
-      return acc;
-    });
-
-    const updatedTxs = transactions.filter((t) => t.id !== id);
-    setTransactions(updatedTxs);
-    setAccounts(updatedAccounts);
-
-    if (isConfigured && supabase) {
-      await supabase.from("transactions").delete().eq("id", id).eq("user_id", user.id);
-      const targetAcc = updatedAccounts.find((a) => a.id === tx.account_id);
-      if (targetAcc) {
-        await supabase.from("accounts").update({ balance: targetAcc.balance }).eq("id", targetAcc.id);
-      }
-    } else {
-      saveLocalStorageData(user.id, { transactions: updatedTxs, accounts: updatedAccounts });
-    }
+    await apiCall(`/transactions/${id}`, { method: "DELETE" });
+    setTransactions((prev) => prev.filter((t) => t.id !== id));
+    // Refresh account balances
+    const accs = await apiCall("/accounts");
+    setAccounts(accs);
   };
 
   // CATEGORIES CRUD
   const addCategory = async (catData: Omit<Category, "id" | "user_id" | "created_at">) => {
     if (!user) return;
-    const newCat: Category = {
-      ...catData,
-      id: "cat_" + Date.now(),
-      user_id: user.id,
-      created_at: new Date().toISOString(),
-    };
-
-    if (isConfigured && supabase) {
-      const { data, error } = await supabase.from("categories").insert({
-        user_id: user.id,
-        name: catData.name,
-        type: catData.type,
-        icon: catData.icon,
-        color: catData.color,
-        is_default: false,
-      }).select().single();
-      if (!error && data) {
-        setCategories((prev) => [...prev, data as Category]);
-      }
-    } else {
-      const updated = [...categories, newCat];
-      setCategories(updated);
-      saveLocalStorageData(user.id, { categories: updated });
-    }
+    const cat = await apiCall("/categories", {
+      method: "POST",
+      body: JSON.stringify(catData),
+    });
+    setCategories((prev) => [...prev, cat]);
   };
 
   const deleteCategory = async (id: string) => {
     if (!user) return;
-    const updated = categories.filter((c) => c.id !== id);
-    setCategories(updated);
-
-    if (isConfigured && supabase) {
-      await supabase.from("categories").delete().eq("id", id).eq("user_id", user.id);
-    } else {
-      saveLocalStorageData(user.id, { categories: updated });
-    }
+    await apiCall(`/categories/${id}`, { method: "DELETE" });
+    setCategories((prev) => prev.filter((c) => c.id !== id));
   };
 
   // BUDGETS
   const setBudget = async (categoryId: string, amount: number, monthYear: string) => {
     if (!user) return;
-    const existingIndex = budgets.findIndex((b) => b.category_id === categoryId && b.month_year === monthYear);
-    let updated: Budget[];
-
-    if (existingIndex >= 0) {
-      updated = budgets.map((b, idx) =>
-        idx === existingIndex ? { ...b, amount, updated_at: new Date().toISOString() } : b
-      );
-    } else {
-      const newBudget: Budget = {
-        id: "bdg_" + Date.now(),
-        user_id: user.id,
-        category_id: categoryId,
-        amount,
-        month_year: monthYear,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      updated = [...budgets, newBudget];
-    }
-
-    setBudgets(updated);
-
-    if (isConfigured && supabase) {
-      await supabase.from("budgets").upsert({
-        user_id: user.id,
-        category_id: categoryId,
-        amount,
-        month_year: monthYear,
-      }, { onConflict: "user_id, category_id, month_year" });
-    } else {
-      saveLocalStorageData(user.id, { budgets: updated });
-    }
+    const budget = await apiCall("/budgets", {
+      method: "POST",
+      body: JSON.stringify({ category_id: categoryId, amount, month_year: monthYear }),
+    });
+    setBudgets((prev) => {
+      const idx = prev.findIndex((b) => b.category_id === categoryId && b.month_year === monthYear);
+      if (idx >= 0) return prev.map((b, i) => (i === idx ? budget : b));
+      return [...prev, budget];
+    });
   };
 
   const deleteBudget = async (id: string) => {
     if (!user) return;
-    const updated = budgets.filter((b) => b.id !== id);
-    setBudgets(updated);
-
-    if (isConfigured && supabase) {
-      await supabase.from("budgets").delete().eq("id", id).eq("user_id", user.id);
-    } else {
-      saveLocalStorageData(user.id, { budgets: updated });
-    }
+    await apiCall(`/budgets/${id}`, { method: "DELETE" });
+    setBudgets((prev) => prev.filter((b) => b.id !== id));
   };
 
   // RECURRING TRANSACTIONS
   const addRecurring = async (recData: Omit<RecurringTransaction, "id" | "user_id" | "created_at" | "updated_at">) => {
     if (!user) return;
-    const newRec: RecurringTransaction = {
-      ...recData,
-      id: "rec_" + Date.now(),
-      user_id: user.id,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    if (isConfigured && supabase) {
-      const { data, error } = await supabase.from("recurring_transactions").insert({
-        user_id: user.id,
-        account_id: recData.account_id,
-        category_id: recData.category_id,
-        title: recData.title,
-        amount: recData.amount,
-        type: recData.type,
-        frequency: recData.frequency,
-        start_date: recData.start_date,
-        next_due_date: recData.next_due_date,
-        is_active: recData.is_active,
-        description: recData.description,
-      }).select().single();
-      if (!error && data) {
-        setRecurring((prev) => [...prev, data as RecurringTransaction]);
-      }
-    } else {
-      const updated = [...recurring, newRec];
-      setRecurring(updated);
-      saveLocalStorageData(user.id, { recurring: updated });
-    }
+    const rec = await apiCall("/recurring", {
+      method: "POST",
+      body: JSON.stringify(recData),
+    });
+    setRecurring((prev) => [...prev, rec]);
   };
 
   const toggleRecurring = async (id: string) => {
     if (!user) return;
-    const updated = recurring.map((r) => (r.id === id ? { ...r, is_active: !r.is_active } : r));
-    setRecurring(updated);
-
-    if (isConfigured && supabase) {
-      const item = updated.find((r) => r.id === id);
-      if (item) {
-        await supabase.from("recurring_transactions").update({ is_active: item.is_active }).eq("id", id).eq("user_id", user.id);
-      }
-    } else {
-      saveLocalStorageData(user.id, { recurring: updated });
-    }
+    const item = recurring.find((r) => r.id === id);
+    if (!item) return;
+    const rec = await apiCall(`/recurring/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ is_active: !item.is_active }),
+    });
+    setRecurring((prev) => prev.map((r) => (r.id === id ? rec : r)));
   };
 
   const deleteRecurring = async (id: string) => {
     if (!user) return;
-    const updated = recurring.filter((r) => r.id !== id);
-    setRecurring(updated);
-
-    if (isConfigured && supabase) {
-      await supabase.from("recurring_transactions").delete().eq("id", id).eq("user_id", user.id);
-    } else {
-      saveLocalStorageData(user.id, { recurring: updated });
-    }
+    await apiCall(`/recurring/${id}`, { method: "DELETE" });
+    setRecurring((prev) => prev.filter((r) => r.id !== id));
   };
 
   const processDueRecurring = async (): Promise<number> => {
@@ -755,16 +445,11 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         else if (item.frequency === "yearly") d.setFullYear(d.getFullYear() + 1);
 
         const nextDateStr = d.toISOString().split("T")[0];
-
-        // Update recurring next date
-        const updated = recurring.map((r) => (r.id === item.id ? { ...r, next_due_date: nextDateStr } : r));
-        setRecurring(updated);
-
-        if (isConfigured && supabase) {
-          await supabase.from("recurring_transactions").update({ next_due_date: nextDateStr }).eq("id", item.id);
-        } else {
-          saveLocalStorageData(user.id, { recurring: updated });
-        }
+        await apiCall(`/recurring/${item.id}`, {
+          method: "PUT",
+          body: JSON.stringify({ next_due_date: nextDateStr }),
+        });
+        setRecurring((prev) => prev.map((r) => (r.id === item.id ? { ...r, next_due_date: nextDateStr } : r)));
         processedCount++;
       }
     }
@@ -774,32 +459,11 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   // SAVINGS GOALS
   const addGoal = async (goalData: Omit<SavingsGoal, "id" | "user_id" | "created_at" | "updated_at" | "current_amount" | "status">) => {
     if (!user) return;
-    const newGoal: SavingsGoal = {
-      ...goalData,
-      id: "goal_" + Date.now(),
-      user_id: user.id,
-      current_amount: 0,
-      status: "in_progress",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    if (isConfigured && supabase) {
-      const { data, error } = await supabase.from("savings_goals").insert({
-        user_id: user.id,
-        name: goalData.name,
-        target_amount: goalData.target_amount,
-        target_date: goalData.target_date,
-        description: goalData.description,
-      }).select().single();
-      if (!error && data) {
-        setGoals((prev) => [...prev, data as SavingsGoal]);
-      }
-    } else {
-      const updated = [...goals, newGoal];
-      setGoals(updated);
-      saveLocalStorageData(user.id, { goals: updated });
-    }
+    const goal = await apiCall("/goals", {
+      method: "POST",
+      body: JSON.stringify(goalData),
+    });
+    setGoals((prev) => [...prev, goal]);
   };
 
   const contributeToGoal = async (goalId: string, accountId: string, amount: number, notes?: string) => {
@@ -807,10 +471,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     const targetGoal = goals.find((g) => g.id === goalId);
     if (!targetGoal) return;
 
-    // Deduct from selected account as goal savings expense
-    const acc = accounts.find((a) => a.id === accountId);
-    if (!acc) return;
-
+    // Deduct from account as expense transaction
     await addTransaction({
       account_id: accountId,
       category_id: null,
@@ -826,68 +487,27 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     const isCompleted = newAmount >= targetGoal.target_amount;
     const status: GoalStatus = isCompleted ? "completed" : "in_progress";
 
-    const updatedGoals = goals.map((g) =>
-      g.id === goalId ? { ...g, current_amount: newAmount, status, updated_at: new Date().toISOString() } : g
-    );
-    setGoals(updatedGoals);
-
-    if (isConfigured && supabase) {
-      await supabase.from("savings_goals").update({ current_amount: newAmount, status }).eq("id", goalId);
-      await supabase.from("goal_contributions").insert({
-        user_id: user.id,
-        goal_id: goalId,
-        account_id: accountId,
-        amount,
-        notes,
-      });
-    } else {
-      saveLocalStorageData(user.id, { goals: updatedGoals });
-    }
+    const updated = await apiCall(`/goals/${goalId}`, {
+      method: "PUT",
+      body: JSON.stringify({ current_amount: newAmount, status }),
+    });
+    setGoals((prev) => prev.map((g) => (g.id === goalId ? updated : g)));
   };
 
   const deleteGoal = async (id: string) => {
     if (!user) return;
-    const updated = goals.filter((g) => g.id !== id);
-    setGoals(updated);
-
-    if (isConfigured && supabase) {
-      await supabase.from("savings_goals").delete().eq("id", id).eq("user_id", user.id);
-    } else {
-      saveLocalStorageData(user.id, { goals: updated });
-    }
+    await apiCall(`/goals/${id}`, { method: "DELETE" });
+    setGoals((prev) => prev.filter((g) => g.id !== id));
   };
 
   // LOANS & DEBTS
   const addLoan = async (loanData: Omit<Loan, "id" | "user_id" | "created_at" | "updated_at" | "paid_amount" | "status">) => {
     if (!user) return;
-    const newLoan: Loan = {
-      ...loanData,
-      id: "loan_" + Date.now(),
-      user_id: user.id,
-      paid_amount: 0,
-      status: "active",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    if (isConfigured && supabase) {
-      const { data, error } = await supabase.from("loans").insert({
-        user_id: user.id,
-        type: loanData.type,
-        counterparty_name: loanData.counterparty_name,
-        total_amount: loanData.total_amount,
-        interest_rate: loanData.interest_rate,
-        due_date: loanData.due_date,
-        notes: loanData.notes,
-      }).select().single();
-      if (!error && data) {
-        setLoans((prev) => [...prev, data as Loan]);
-      }
-    } else {
-      const updated = [...loans, newLoan];
-      setLoans(updated);
-      saveLocalStorageData(user.id, { loans: updated });
-    }
+    const loan = await apiCall("/loans", {
+      method: "POST",
+      body: JSON.stringify(loanData),
+    });
+    setLoans((prev) => [...prev, loan]);
   };
 
   const recordLoanRepayment = async (loanId: string, accountId: string | null, amount: number, notes?: string) => {
@@ -895,7 +515,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     const loan = loans.find((l) => l.id === loanId);
     if (!loan) return;
 
-    // If an account was chosen, link repayment as transaction
+    // If an account was chosen, create a transaction for it
     if (accountId) {
       await addTransaction({
         account_id: accountId,
@@ -912,35 +532,17 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     const newPaid = loan.paid_amount + amount;
     const status: LoanStatus = newPaid >= loan.total_amount ? "paid_off" : "active";
 
-    const updatedLoans = loans.map((l) =>
-      l.id === loanId ? { ...l, paid_amount: newPaid, status, updated_at: new Date().toISOString() } : l
-    );
-    setLoans(updatedLoans);
-
-    if (isConfigured && supabase) {
-      await supabase.from("loans").update({ paid_amount: newPaid, status }).eq("id", loanId);
-      await supabase.from("loan_repayments").insert({
-        user_id: user.id,
-        loan_id: loanId,
-        account_id: accountId,
-        amount,
-        notes,
-      });
-    } else {
-      saveLocalStorageData(user.id, { loans: updatedLoans });
-    }
+    const updated = await apiCall(`/loans/${loanId}`, {
+      method: "PUT",
+      body: JSON.stringify({ paid_amount: newPaid, status }),
+    });
+    setLoans((prev) => prev.map((l) => (l.id === loanId ? updated : l)));
   };
 
   const deleteLoan = async (id: string) => {
     if (!user) return;
-    const updated = loans.filter((l) => l.id !== id);
-    setLoans(updated);
-
-    if (isConfigured && supabase) {
-      await supabase.from("loans").delete().eq("id", id).eq("user_id", user.id);
-    } else {
-      saveLocalStorageData(user.id, { loans: updated });
-    }
+    await apiCall(`/loans/${id}`, { method: "DELETE" });
+    setLoans((prev) => prev.filter((l) => l.id !== id));
   };
 
   // COMPUTED FINANCIALS (Strictly based on real database records, NO hardcoded fake numbers)
@@ -1012,7 +614,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         notifications,
         preferences,
         isLoading,
-        isConfigured,
+        isConfigured: true,
         preferredCurrency,
         selectedRange,
         setSelectedRange,

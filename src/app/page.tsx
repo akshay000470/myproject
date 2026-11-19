@@ -88,7 +88,7 @@ export default function HomePage() {
 
       <footer className="h-12 border-t border-[#E7E6DF] bg-[#FFFFFF] px-6 flex items-center justify-between text-[11px] text-[#777B76]">
         <span>© 2026 Antigravity Financial Technologies. All rights reserved.</span>
-        <span>Secure PostgreSQL & Supabase Architecture</span>
+        <span>Secure MongoDB Atlas Architecture</span>
       </footer>
     </div>
   );
